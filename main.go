@@ -6,6 +6,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"ugreen-led-go/pkg/dxp480tplus"
+	"ugreen-led-go/pkg/i2c"
 	"ugreen-led-go/pkg/ugreen"
 )
 
@@ -13,6 +15,8 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `UGREEN LED Controller
 
 Usage:
+  %s dxp480t-plus <probe|white|white-blink|off> [bus]
+                           - DXP480T Plus power LED (controller 0x26, bus auto-detected)
   %s probe [bus]           - Probe I2C bus for LEDs (read-only, safe)
   %s get <led>             - Get LED status
   %s set <led> <command>   - Set LED state
@@ -33,7 +37,7 @@ Examples:
   %s set power color 255 0 0 - Set power LED to red
   %s set disk1 blink 500 500 - Blink disk1 LED
 
-`, os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
+`, os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
 	os.Exit(1)
 }
 
@@ -52,7 +56,7 @@ var ledNames = map[string]ugreen.LEDType{
 
 func probeBus(bus int) error {
 	fmt.Printf("Probing I2C bus %d at address 0x%02x...\n", bus, ugreen.I2C_ADDR)
-	
+
 	ctrl, err := ugreen.NewController(bus)
 	if err != nil {
 		return fmt.Errorf("failed to open controller: %w", err)
@@ -60,14 +64,14 @@ func probeBus(bus int) error {
 	defer ctrl.Close()
 
 	results := make(map[string]interface{})
-	
+
 	for name, ledType := range ledNames {
 		status, err := ctrl.GetStatus(ledType)
 		if err != nil {
 			results[name] = map[string]string{"error": err.Error()}
 			continue
 		}
-		
+
 		stateStr := "unknown"
 		switch status.State {
 		case ugreen.StateOff:
@@ -79,7 +83,7 @@ func probeBus(bus int) error {
 		case ugreen.StateBreath:
 			stateStr = "breath"
 		}
-		
+
 		results[name] = map[string]interface{}{
 			"state":      stateStr,
 			"brightness": status.Brightness,
@@ -88,10 +92,10 @@ func probeBus(bus int) error {
 			"t_off_ms":   status.TOff,
 		}
 	}
-	
+
 	output, _ := json.MarshalIndent(results, "", "  ")
 	fmt.Println(string(output))
-	
+
 	return nil
 }
 
@@ -100,12 +104,12 @@ func getLED(ctrl *ugreen.Controller, ledName string) error {
 	if !ok {
 		return fmt.Errorf("unknown LED: %s", ledName)
 	}
-	
+
 	status, err := ctrl.GetStatus(ledType)
 	if err != nil {
 		return err
 	}
-	
+
 	stateStr := "unknown"
 	switch status.State {
 	case ugreen.StateOff:
@@ -117,7 +121,7 @@ func getLED(ctrl *ugreen.Controller, ledName string) error {
 	case ugreen.StateBreath:
 		stateStr = "breath"
 	}
-	
+
 	fmt.Printf("%s:\n", ledName)
 	fmt.Printf("  State:      %s\n", stateStr)
 	fmt.Printf("  Brightness: %d\n", status.Brightness)
@@ -125,7 +129,7 @@ func getLED(ctrl *ugreen.Controller, ledName string) error {
 	if status.State == ugreen.StateBlink || status.State == ugreen.StateBreath {
 		fmt.Printf("  Timing:     %dms on, %dms off\n", status.TOn, status.TOff)
 	}
-	
+
 	return nil
 }
 
@@ -133,22 +137,22 @@ func setLED(ctrl *ugreen.Controller, args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("not enough arguments for set command")
 	}
-	
+
 	ledName := args[0]
 	ledType, ok := ledNames[ledName]
 	if !ok {
 		return fmt.Errorf("unknown LED: %s", ledName)
 	}
-	
+
 	command := args[1]
-	
+
 	switch command {
 	case "on":
 		return ctrl.SetOnOff(ledType, true)
-		
+
 	case "off":
 		return ctrl.SetOnOff(ledType, false)
-		
+
 	case "color":
 		if len(args) < 5 {
 			return fmt.Errorf("color requires 3 arguments: R G B")
@@ -156,13 +160,13 @@ func setLED(ctrl *ugreen.Controller, args []string) error {
 		r, _ := strconv.Atoi(args[2])
 		g, _ := strconv.Atoi(args[3])
 		b, _ := strconv.Atoi(args[4])
-		
+
 		if r < 0 || r > 255 || g < 0 || g > 255 || b < 0 || b > 255 {
 			return fmt.Errorf("color values must be 0-255")
 		}
-		
+
 		return ctrl.SetColor(ledType, uint8(r), uint8(g), uint8(b))
-		
+
 	case "brightness":
 		if len(args) < 3 {
 			return fmt.Errorf("brightness requires 1 argument")
@@ -171,22 +175,22 @@ func setLED(ctrl *ugreen.Controller, args []string) error {
 		if brightness < 0 || brightness > 255 {
 			return fmt.Errorf("brightness must be 0-255")
 		}
-		
+
 		return ctrl.SetBrightness(ledType, uint8(brightness))
-		
+
 	case "blink":
 		if len(args) < 4 {
 			return fmt.Errorf("blink requires 2 arguments: T_ON T_OFF (in milliseconds)")
 		}
 		tOn, _ := strconv.Atoi(args[2])
 		tOff, _ := strconv.Atoi(args[3])
-		
+
 		if tOn < 0 || tOn > 65535 || tOff < 0 || tOff > 65535 {
 			return fmt.Errorf("timing values must be 0-65535")
 		}
-		
+
 		return ctrl.SetBlink(ledType, uint16(tOn), uint16(tOff))
-		
+
 	default:
 		return fmt.Errorf("unknown command: %s", command)
 	}
@@ -196,10 +200,16 @@ func main() {
 	if len(os.Args) < 2 {
 		usage()
 	}
-	
+
 	cmd := strings.ToLower(os.Args[1])
-	
+
 	switch cmd {
+	case "dxp480t-plus":
+		if err := runDXP480TPlus(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "DXP480T Plus: %v\n", err)
+			os.Exit(1)
+		}
+
 	case "probe":
 		bus := 0
 		if len(os.Args) > 2 {
@@ -210,52 +220,95 @@ func main() {
 				os.Exit(1)
 			}
 		}
-		
+
 		if err := probeBus(bus); err != nil {
 			fmt.Fprintf(os.Stderr, "Probe failed: %v\n", err)
 			os.Exit(1)
 		}
-		
+
 	case "get":
 		if len(os.Args) < 3 {
 			fmt.Fprintf(os.Stderr, "get requires LED name\n")
 			usage()
 		}
-		
+
 		ctrl, err := ugreen.NewController(0)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to open controller: %v\n", err)
 			os.Exit(1)
 		}
 		defer ctrl.Close()
-		
+
 		if err := getLED(ctrl, os.Args[2]); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to get LED status: %v\n", err)
 			os.Exit(1)
 		}
-		
+
 	case "set":
 		if len(os.Args) < 4 {
 			fmt.Fprintf(os.Stderr, "set requires LED name and command\n")
 			usage()
 		}
-		
+
 		ctrl, err := ugreen.NewController(0)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to open controller: %v\n", err)
 			os.Exit(1)
 		}
 		defer ctrl.Close()
-		
+
 		if err := setLED(ctrl, os.Args[2:]); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to set LED: %v\n", err)
 			os.Exit(1)
 		}
-		
+
 		fmt.Println("✓ LED updated successfully")
-		
+
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", cmd)
 		usage()
 	}
+}
+
+func runDXP480TPlus(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: dxp480t-plus <probe|white|white-blink|off> [bus]")
+	}
+	action := strings.ToLower(args[0])
+	if action != "probe" {
+		if _, ok := dxp480tplus.Sequences[action]; !ok {
+			return fmt.Errorf("unknown action %q", action)
+		}
+	}
+	if !dxp480tplus.IsDXP480TPlus("/sys") && os.Getenv("UGREEN_FORCE_MODEL") != "1" {
+		return fmt.Errorf("this host is not a UGREEN DXP480T Plus (set UGREEN_FORCE_MODEL=1 to override)")
+	}
+	var bus int
+	var err error
+	if len(args) > 1 {
+		bus, err = strconv.Atoi(args[1])
+	} else {
+		bus, err = dxp480tplus.FindI801Bus("/sys")
+	}
+	if err != nil {
+		return err
+	}
+	dev, err := i2c.Open(bus, dxp480tplus.Addr)
+	if err != nil {
+		return err
+	}
+	defer dev.Close()
+	if action == "probe" {
+		v, err := dxp480tplus.Probe(dev)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("bus %d, controller 0x%02x answers (0x50 = 0x%02x)\n", bus, dxp480tplus.Addr, v)
+		return nil
+	}
+	if err := dxp480tplus.Apply(dev, dxp480tplus.Sequences[action]); err != nil {
+		return err
+	}
+	fmt.Printf("bus %d: %s sequence written\n", bus, action)
+	return nil
 }

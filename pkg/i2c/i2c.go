@@ -125,3 +125,21 @@ func (d *Device) WriteBlockData(reg uint8, data []byte) error {
 
 	return nil
 }
+
+// WriteByteData writes a single byte to a register (SMBus write byte data)
+func (d *Device) WriteByteData(reg uint8, value uint8) error {
+	var data [32]byte
+	data[0] = value
+	args := smbusIoctlData{
+		readWrite: I2C_SMBUS_WRITE,
+		command:   reg,
+		size:      I2C_SMBUS_BYTE_DATA,
+		data:      uintptr(unsafe.Pointer(&data)),
+	}
+
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, d.file.Fd(), I2C_SMBUS, uintptr(unsafe.Pointer(&args)))
+	if errno != 0 {
+		return fmt.Errorf("SMBus write byte failed: %s", errno)
+	}
+	return nil
+}
