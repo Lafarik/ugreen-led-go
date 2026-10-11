@@ -1,0 +1,6 @@
+# Binaries
+/ugreen-led-ctl
+/test-0x26
+/test-write-0x26
+*.exe
+/ARCHIVE.md
